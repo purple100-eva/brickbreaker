@@ -79,13 +79,16 @@
   let aim = 0; // radians from vertical
   let time = 0, ballPhase = 0;
   let lastLostAge = 0, currentCard = null, currentJoke = '';
-  let buttonRect = null;
+  let buttonRects = [];
+  let pausedFrom = null;
+  let musicOn = true;
   let ignoreNextUp = false, pointerIsDown = false;
   const keys = {};
   const paddle = { x: 0, target: 0, w: 80, h: 14 };
   const grid = { cols: 0, rows: 0, pad: 0, pitchX: 0, pitchY: 0, eggW: 0, eggH: 0, top: 0 };
 
   try { best = +localStorage.getItem('eggcellent-best') || 0; } catch (e) { /* ignore */ }
+  try { musicOn = localStorage.getItem('eggcellent-music') !== 'off'; } catch (e) { /* ignore */ }
 
   // ---- Helpers ------------------------------------------------------------
   const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
@@ -183,6 +186,65 @@
     lose: () => choir([261.6, 329.6, 392, 523.3], 1.6, 0.035),
     win: () => [523, 659, 784, 1047].forEach((f, i) => beep(f, 0.22, 'triangle', 0.08, 0, i * 0.12)),
   };
+
+  // ---- Music: a quiet little chiptune loop -------------------------------
+  const STEP = 60 / 112 / 2; // eighth notes at 112 bpm
+  const midiHz = n => 440 * Math.pow(2, (n - 69) / 12);
+  const _ = 0;
+  const LEAD = [
+    72, _, 76, 79, _, 76, 72, _,   69, _, 72, 76, _, 72, 69, _,
+    65, _, 69, 72, _, 74, 72, _,   67, _, 71, 74, _, 71, 67, 71,
+    79, 77, 76, _, 72, _, 74, 76,  76, _, 72, _, 69, 71, 72, _,
+    77, _, 76, 74, 72, _, 69, _,   71, 72, 74, _, 79, _, 74, _,
+  ];
+  const BASS = [48, 45, 41, 43, 48, 45, 41, 43];
+  let musicStep = 0, musicNext = 0;
+  function blip(freq, t, dur, type, vol) {
+    const o = actx.createOscillator(), g = actx.createGain();
+    o.type = type;
+    o.frequency.setValueAtTime(freq, t);
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.linearRampToValueAtTime(vol, t + 0.005);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    o.connect(g).connect(actx.destination);
+    o.start(t);
+    o.stop(t + dur + 0.02);
+  }
+  function musicTick() {
+    if (!actx || actx.state !== 'running' || !musicOn || state === 'paused' || document.hidden) return;
+    const now = actx.currentTime;
+    if (musicNext < now) musicNext = now + 0.05;
+    while (musicNext < now + 0.25) {
+      const i = musicStep % LEAD.length, s = i % 8;
+      if (LEAD[i]) blip(midiHz(LEAD[i]), musicNext, STEP * 0.7, 'square', 0.016);
+      if (s % 2 === 0) blip(midiHz(BASS[Math.floor(i / 8)] + (s % 4 === 2 ? 12 : 0)), musicNext, STEP * 1.6, 'triangle', 0.05);
+      musicNext += STEP;
+      musicStep++;
+    }
+  }
+  setInterval(musicTick, 50);
+
+  function setMusic(on) {
+    musicOn = on;
+    try { localStorage.setItem('eggcellent-music', on ? 'on' : 'off'); } catch (e) { /* ignore */ }
+  }
+
+  // ---- Pause --------------------------------------------------------------
+  const canPause = () => state === 'aim' || state === 'play';
+  function pause() {
+    if (!canPause()) return;
+    pausedFrom = state;
+    state = 'paused';
+  }
+  function resume() {
+    if (state !== 'paused') return;
+    state = pausedFrom;
+    pausedFrom = null;
+  }
+  function pauseButtonRect() {
+    const s = Math.max(30, Math.min(38, U * 8));
+    return { x: FX + U * 3, y: SAFE_TOP + (TOP - SAFE_TOP) / 2 - s / 2, w: s, h: s };
+  }
 
   // ---- Layout -------------------------------------------------------------
   function resize() {
@@ -392,6 +454,7 @@
 
   // ---- Update -------------------------------------------------------------
   function update(dt) {
+    if (state === 'paused') return;
     time += dt;
     stateTime += dt;
     ballPhase += dt * 14;
@@ -964,8 +1027,24 @@
     ctx.textBaseline = 'middle';
     ctx.fillStyle = HUD_INK;
     ctx.font = `800 ${fs}px ${FONT}`;
+    const pb = pauseButtonRect();
+    ctx.fillStyle = 'rgba(255,255,255,0.75)';
+    ctx.strokeStyle = 'rgba(160,52,107,0.35)';
+    ctx.lineWidth = 1.5;
+    roundRect(pb.x, pb.y, pb.w, pb.h, pb.w * 0.3);
+    ctx.fill(); ctx.stroke();
+    ctx.fillStyle = HUD_INK;
+    if (state === 'paused') {
+      ctx.beginPath();
+      ctx.moveTo(pb.x + pb.w * 0.38, pb.y + pb.h * 0.28);
+      ctx.lineTo(pb.x + pb.w * 0.72, pb.y + pb.h * 0.5);
+      ctx.lineTo(pb.x + pb.w * 0.38, pb.y + pb.h * 0.72);
+      ctx.closePath(); ctx.fill();
+    } else {
+      for (const fx of [0.32, 0.56]) roundRect(pb.x + pb.w * fx, pb.y + pb.h * 0.28, pb.w * 0.13, pb.h * 0.44, 2), ctx.fill();
+    }
     ctx.textAlign = 'left';
-    ctx.fillText(`Level ${level}/${LEVELS.length}`, FX + U * 3, y);
+    ctx.fillText(`Level ${level}/${LEVELS.length}`, pb.x + pb.w + U * 2.5, y);
     ctx.textAlign = 'center';
     ctx.fillText(`👶 ${score}`, FX + FW / 2, y);
     ctx.textAlign = 'right';
@@ -1000,9 +1079,11 @@
       for (const t of wrapText(l.text, pw - padX * 2)) rows.push({ ...l, text: t, h: l.size * 1.35 });
     }
     const iconH = opts.iconH || 0;
-    const btnH = opts.button ? Math.max(46, U * 11) : 0;
+    const buttons = opts.buttons || (opts.button ? [{ label: opts.button, id: 'main' }] : []);
+    const btnH = Math.max(46, U * 11), btnGap = 12;
+    const btnsH = buttons.length ? 18 + buttons.length * btnH + (buttons.length - 1) * btnGap : 0;
     const textH = rows.reduce((a, r) => a + r.h, 0);
-    const ph = padY * 2 + iconH + textH + (btnH ? btnH + 18 : 0);
+    const ph = padY * 2 + iconH + textH + btnsH;
     const px = W / 2 - pw / 2, py = opts.y != null ? opts.y : H / 2 - ph / 2;
 
     ctx.fillStyle = 'rgba(255,255,255,0.92)';
@@ -1023,23 +1104,34 @@
       y += r.h;
     }
 
-    buttonRect = null;
-    if (opts.button) {
-      const bw = Math.min(pw - padX * 2, 230);
-      const bx = W / 2 - bw / 2, by = y + 18;
-      const ready = stateTime > 0.5;
+    buttonRects = [];
+    const bw = Math.min(pw - padX * 2, 230);
+    const bx = W / 2 - bw / 2;
+    let by = y + 18;
+    const ready = opts.instant || stateTime > 0.5;
+    for (const btn of buttons) {
       ctx.globalAlpha = ready ? 1 : 0.45;
-      const g = ctx.createLinearGradient(0, by, 0, by + btnH);
-      g.addColorStop(0, '#ff8fbf');
-      g.addColorStop(1, ACCENT);
-      ctx.fillStyle = g;
-      roundRect(bx, by, bw, btnH, btnH / 2);
-      ctx.fill();
-      ctx.fillStyle = '#fff';
-      ctx.font = `900 ${btnH * 0.42}px ${FONT}`;
-      ctx.fillText(opts.button, W / 2, by + btnH / 2 + 1);
+      if (btn.secondary) {
+        ctx.fillStyle = '#fff';
+        ctx.strokeStyle = ACCENT;
+        ctx.lineWidth = 2;
+        roundRect(bx, by, bw, btnH, btnH / 2);
+        ctx.fill(); ctx.stroke();
+        ctx.fillStyle = ACCENT;
+      } else {
+        const g = ctx.createLinearGradient(0, by, 0, by + btnH);
+        g.addColorStop(0, '#ff8fbf');
+        g.addColorStop(1, ACCENT);
+        ctx.fillStyle = g;
+        roundRect(bx, by, bw, btnH, btnH / 2);
+        ctx.fill();
+        ctx.fillStyle = '#fff';
+      }
+      ctx.font = `900 ${btnH * 0.4}px ${FONT}`;
+      ctx.fillText(btn.label, W / 2, by + btnH / 2 + 1);
       ctx.globalAlpha = 1;
-      buttonRect = { x: bx, y: by, w: bw, h: btnH };
+      buttonRects.push({ x: bx, y: by, w: bw, h: btnH, id: btn.id });
+      by += btnH + btnGap;
     }
     return { px, py, pw, ph };
   }
@@ -1088,12 +1180,13 @@
     for (const b of bricks) if (b.alive) drawBrick(b);
     for (const d of iuds) drawIUD(d);
     drawPaddle();
-    if (state === 'aim') {
+    const view = state === 'paused' ? pausedFrom : state;
+    if (view === 'aim') {
       const g = pointerGeom();
       drawPointer(g);
       drawSperm(g.ballX, g.ballY, aim - Math.PI / 2, BR, ballPhase);
     }
-    if (state === 'play') {
+    if (view === 'play') {
       for (const b of balls) drawSperm(b.x, b.y, Math.atan2(b.vy, b.vx), BR, ballPhase);
       for (const k of tokens) drawToken(k);
     }
@@ -1111,6 +1204,14 @@
       ctx.globalAlpha = 1;
     }
     if (state === 'missed') drawMissCard(fs);
+    if (state === 'paused') {
+      drawPanel([
+        { text: 'Paused', size: fs * 1.3, weight: 900, color: ACCENT },
+      ], { instant: true, buttons: [
+        { label: 'Resume', id: 'main' },
+        { label: musicOn ? 'Music: On 🎵' : 'Music: Off', id: 'music', secondary: true },
+      ] });
+    }
     if (state === 'levelclear' && stateTime > 0.7) {
       drawPanel([
         { text: `Level ${level} complete! 🎉`, size: fs * 1.15, weight: 900, color: ACCENT },
@@ -1149,6 +1250,12 @@
     aim = clamp(Math.atan2(dx, -dy), -1.2, 1.2);
   }
 
+  function hitButton(x, y) {
+    const slop = 8;
+    const r = buttonRects.find(r => x >= r.x - slop && x <= r.x + r.w + slop && y >= r.y - slop && y <= r.y + r.h + slop);
+    return r ? r.id : null;
+  }
+
   // Handles taps on the menu-style screens. Returns true if the tap was used up.
   function advance(x, y) {
     if (state === 'title' || (state === 'win' && stateTime > 0.9)) { newGame(); return true; }
@@ -1159,10 +1266,14 @@
       setState('aim');
       return true;
     }
+    if (state === 'paused') {
+      const id = x == null ? 'main' : hitButton(x, y);
+      if (id === 'main') resume();
+      else if (id === 'music') setMusic(!musicOn);
+      return true;
+    }
     if (state === 'missed' || state === 'gameover') {
-      const r = buttonRect, slop = 12;
-      const onButton = x == null || (r && x >= r.x - slop && x <= r.x + r.w + slop && y >= r.y - slop && y <= r.y + r.h + slop);
-      if (stateTime > 0.5 && onButton) {
+      if (stateTime > 0.5 && (x == null || hitButton(x, y) === 'main')) {
         if (state === 'missed') dismissMiss(); else newGame();
       }
       return true;
@@ -1175,6 +1286,13 @@
     unlockAudio();
     pointerIsDown = true;
     try { canvas.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ }
+    const pb = pauseButtonRect(), slop = 8;
+    if ((canPause() || state === 'paused') && e.clientX >= pb.x - slop && e.clientX <= pb.x + pb.w + slop &&
+        e.clientY >= pb.y - slop && e.clientY <= pb.y + pb.h + slop) {
+      if (state === 'paused') resume(); else pause();
+      ignoreNextUp = true;
+      return;
+    }
     if (advance(e.clientX, e.clientY)) { ignoreNextUp = true; return; }
     if (state === 'aim') setAimFrom(e.clientX, e.clientY);
     else if (state === 'play') paddle.target = e.clientX;
@@ -1186,6 +1304,7 @@
   });
   const up = e => {
     pointerIsDown = false;
+    unlockAudio();
     if (ignoreNextUp) { ignoreNextUp = false; return; }
     if (e.type === 'pointerup' && state === 'aim') launch();
   };
@@ -1195,6 +1314,10 @@
 
   window.addEventListener('keydown', e => {
     keys[e.key] = true;
+    if (e.key === 'p' || e.key === 'P' || e.key === 'Escape') {
+      if (state === 'paused') resume(); else pause();
+      return;
+    }
     if (e.key === ' ' || e.key === 'Enter') {
       e.preventDefault();
       unlockAudio();
@@ -1223,7 +1346,10 @@
     draw();
     requestAnimationFrame(loop);
   }
-  document.addEventListener('visibilitychange', () => { last = performance.now(); });
+  document.addEventListener('visibilitychange', () => {
+    last = performance.now();
+    if (document.hidden) pause();
+  });
 
   resize();
   requestAnimationFrame(loop);
