@@ -2,7 +2,7 @@
 
 A sperm-and-egg brickbreaker, made with love for Mom 💕
 
-Play it: https://YOUR-USERNAME.github.io/egg-cellent/
+Play it: https://purple100-eva.github.io/brickbreaker/
 
 ## How to play
 - **Phone:** drag to aim, let go to launch, then drag to move the paddle.
