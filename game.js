@@ -4,7 +4,7 @@
   // ---- Customize me! ------------------------------------------------------
   const GAME_TITLE = 'Egg-cellent!';
   const GIFT_MESSAGE = 'Made with love for Mom 💕';
-  const WIN_DEDICATION = 'Thanks for teaching me where babies come from, Mom 💕';
+  const WIN_DEDICATION = 'Happy birthday, Mom! 💕';
 
   // Shown at random after each level. {babies} = eggs hatched that level.
   const LEVEL_JOKES = [
@@ -20,6 +20,13 @@
     { text: 'Sperm can live up to 5 days. That one lasted {seconds} seconds.', button: 'Tragic' },
     { text: 'Spermicide: 1. You: 0.', button: 'Rematch' },
     { text: "Don't worry, there are 200 million more where that came from.", button: 'Next!' },
+  ];
+  // Shown at random on the game-over screen.
+  const GAME_OVER_JOKES = [
+    'Even IUI couldn\'t save this one.',
+    'Good news: your insurance covers one more round.',
+    'Have you considered a turkey baster?',
+    'Have you tried just relaxing?',
   ];
   // -------------------------------------------------------------------------
 
@@ -109,6 +116,7 @@
   }
   const nextJoke = shuffleBag(LEVEL_JOKES);
   const nextCard = shuffleBag(MISS_CARDS);
+  const nextGameOverJoke = shuffleBag(GAME_OVER_JOKES);
 
   function roundRect(x, y, w, h, r) {
     r = Math.min(r, w / 2, h / 2);
@@ -301,6 +309,7 @@
   function dismissMiss() {
     if (lives <= 0) {
       saveBest();
+      currentJoke = nextGameOverJoke();
       setState('gameover');
     } else {
       aim = 0;
@@ -1126,8 +1135,9 @@
         { text: 'Out of swimmers!', size: fs * 1.3, weight: 900, color: ACCENT },
         { text: `You delivered ${score} ${score === 1 ? 'baby' : 'babies'} 👶`, size: fs * 0.85 },
         { text: `Best: ${best}`, size: fs * 0.75, weight: 600 },
-        { text: 'Tap to play again', size: fs * 0.8, pulse: true, color: ACCENT },
-      ]);
+        { text: ' ', size: 6 },
+        { text: currentJoke, size: fs * 0.85, weight: 700 },
+      ], { button: 'Try again' });
     }
   }
 
@@ -1141,7 +1151,7 @@
 
   // Handles taps on the menu-style screens. Returns true if the tap was used up.
   function advance(x, y) {
-    if (state === 'title' || ((state === 'gameover' || state === 'win') && stateTime > 0.9)) { newGame(); return true; }
+    if (state === 'title' || (state === 'win' && stateTime > 0.9)) { newGame(); return true; }
     if (state === 'levelclear' && stateTime > 0.7) {
       level++;
       babies = [];
@@ -1149,13 +1159,15 @@
       setState('aim');
       return true;
     }
-    if (state === 'missed') {
+    if (state === 'missed' || state === 'gameover') {
       const r = buttonRect, slop = 12;
       const onButton = x == null || (r && x >= r.x - slop && x <= r.x + r.w + slop && y >= r.y - slop && y <= r.y + r.h + slop);
-      if (stateTime > 0.5 && onButton) dismissMiss();
+      if (stateTime > 0.5 && onButton) {
+        if (state === 'missed') dismissMiss(); else newGame();
+      }
       return true;
     }
-    return state === 'gameover' || state === 'levelclear' || state === 'win';
+    return state === 'levelclear' || state === 'win';
   }
 
   canvas.addEventListener('pointerdown', e => {
